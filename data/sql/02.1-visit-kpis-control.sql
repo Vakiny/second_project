@@ -1,15 +1,17 @@
 -- Client completion rate
-CREATE OR REPLACE VIEW view_latest_steps_per_visit AS (
-    SELECT client_id, visitor_id, visit_id, process_step, MAX(date_time) AS last_date_time
-    FROM client_visits
-    GROUP BY client_id, visitor_id, visit_id, process_step
+CREATE OR REPLACE VIEW view_latest_steps_per_visit_control AS (
+    SELECT cv.client_id, visitor_id, visit_id, process_step, MAX(date_time) AS last_date_time
+    FROM client_visits cv
+    JOIN client_experiments ce ON cv.client_id = ce.client_id
+    wHERE ce.variation = 'Control'
+    GROUP BY cv.client_id, visitor_id, visit_id, process_step
 );
 
 WITH cte_distinct_client_stats AS (
 	SELECT
 		COUNT(DISTINCT CASE WHEN process_step = 'confirm' THEN client_id END) AS completed_clients,
 		COUNT(DISTINCT client_id) AS total_clients
-	FROM view_latest_steps_per_visit
+	FROM view_latest_steps_per_visit_control
 )
 SELECT *, ROUND(completed_clients * 100.0 / total_clients, 2) AS completion_rate_percentage
 FROM cte_distinct_client_stats;
@@ -23,7 +25,7 @@ WITH cte_step_durations_per_visit AS (
             LAG(last_date_time) OVER (PARTITION BY client_id, visitor_id, visit_id ORDER BY last_date_time), 
             last_date_time
         ) AS time_spent_seconds
-    FROM view_latest_steps_per_visit
+    FROM view_latest_steps_per_visit_control
 )
 SELECT process_step, ROUND(AVG(time_spent_seconds), 2) AS avg_time_seconds
 FROM cte_step_durations_per_visit
@@ -35,7 +37,7 @@ ORDER BY process_step='confirm', process_step='step_3', process_step='step_2', p
 WITH
 cte_step_orders AS (
     SELECT *, ROW_NUMBER() OVER (PARTITION BY client_id, visitor_id, visit_id ORDER BY last_date_time) AS step_order
-    FROM view_latest_steps_per_visit
+    FROM view_latest_steps_per_visit_control
 ),
 cte_errors AS (
 	SELECT so1.client_id, so1.visitor_id, so1.visit_id, COUNT(*) AS errors
@@ -60,16 +62,17 @@ FROM cte_error_stats;
 -- Completion rate per step
 WITH
 cte_step_counts AS (
-    SELECT process_step, COUNT(DISTINCT client_id, visitor_id, visit_id) AS num_visits
-    FROM view_latest_steps_per_visit
+    SELECT process_step, COUNT(DISTINCT client_id, visit_id) AS num_visits
+    FROM view_latest_steps_per_visit_control
     GROUP BY process_step
 ),
 cte_total_visits AS (
     SELECT COUNT(DISTINCT client_id, visitor_id, visit_id) AS total_visits
-    FROM view_latest_steps_per_visit
+    FROM view_latest_steps_per_visit_control
     WHERE process_step = 'start'
 )
 SELECT sc.process_step, sc.num_visits, ROUND(sc.num_visits * 100.0 / tv.total_visits, 2) AS completion_rate_percentage
 FROM cte_step_counts sc
 CROSS JOIN cte_total_visits tv
 ORDER BY sc.num_visits DESC;
+

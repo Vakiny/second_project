@@ -6,7 +6,7 @@ GROUP BY c.id
 ORDER BY total_visits DESC
 LIMIT 10;
 
-CREATE VIEW view_client_visits AS (
+CREATE OR REPLACE VIEW view_client_visits AS (
     SELECT client_id, COUNT(*) AS num_visits
     FROM client_visits
     GROUP BY client_id
